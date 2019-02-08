@@ -27,8 +27,10 @@
 #ifndef OPM_COMPUTE_FROM_REFERENCE_PHASE_HPP
 #define OPM_COMPUTE_FROM_REFERENCE_PHASE_HPP
 
-#include <opm/material/constraintsolvers/CompositionFromFugacities.hpp>
+//#include <opm/material/constraintsolvers/CompositionFromFugacities.hpp>
+#include <opm/material/constraintsolvers/DifferentCompositionFromFugacities.hpp>
 
+#include <opm/material/common/Exceptions.hpp>
 #include <opm/material/common/Valgrind.hpp>
 
 #include <dune/common/fvector.hh>
@@ -65,7 +67,7 @@ class ComputeFromReferencePhase
 {
     enum { numPhases = FluidSystem::numPhases };
     enum { numComponents = FluidSystem::numComponents };
-    typedef ::Opm::CompositionFromFugacities<Scalar, FluidSystem, Evaluation> CompositionFromFugacities;
+    typedef Opm::CompositionFromFugacities<Scalar, FluidSystem, Evaluation> CompositionFromFugacities;
     typedef Dune::FieldVector<Evaluation, numComponents> ComponentVector;
 
 public:
@@ -145,33 +147,17 @@ public:
             if (phaseIdx == refPhaseIdx)
                 continue; // reference phase is already calculated
 
-            if (phaseIdx == FluidSystem::waterPhaseIdx) {
-                for (unsigned compIdx = 0; compIdx < numComponents; ++compIdx) {
-                    if (compIdx == FluidSystem::BrineIdx)
-                        fluidState.setMoleFraction(phaseIdx, compIdx, 0.99998);
-                    else
-                        fluidState.setMoleFraction(phaseIdx, compIdx, 0.00001);
+            if (phaseIdx == FluidSystem::waterPhaseIdx)
+                continue;
 
-                    paramCache.updatePhase(fluidState, phaseIdx);
-                    paramCache.updateAll(fluidState);
-                    const Evaluation& rho = FluidSystem::density(fluidState, paramCache, phaseIdx);
-                    fluidState.setDensity(phaseIdx, rho);
-
-                    const Evaluation& phi = FluidSystem::fugacityCoefficient(fluidState, paramCache, phaseIdx, compIdx);
-                    fluidState.setFugacityCoefficient(phaseIdx, compIdx, phi);
-                    paramCache.updatePhase(fluidState, phaseIdx);
-                }
-
-            } else {
             ComponentVector fugVec;
             for (unsigned compIdx = 0; compIdx < numComponents; ++compIdx) {
                 const auto& fug = fluidState.fugacity(refPhaseIdx, compIdx);
-                fugVec[compIdx] = decay<Evaluation>(fug);
+                fugVec[compIdx] = Opm::decay<Evaluation>(fug);
             }
 
             CompositionFromFugacities::solve(fluidState, paramCache, phaseIdx, fugVec);
 
-            }
             if (setViscosity)
                 fluidState.setViscosity(phaseIdx,
                                         FluidSystem::viscosity(fluidState,

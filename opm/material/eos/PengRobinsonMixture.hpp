@@ -89,51 +89,19 @@ public:
       * 4th edition, McGraw-Hill, 1987, pp. 42-44, 143-145
       */
     template <class FluidState, class Params, class LhsEval = typename FluidState::Scalar>
-    static LhsEval computeFugacityCoefficient(const FluidState& fs2,
-                                              const Params& params2,
+    static LhsEval computeFugacityCoefficient(const FluidState& fs,
+                                              const Params& params,
                                               unsigned phaseIdx,
                                               unsigned compIdx)
     {
-#if 0
-#warning HACK
-        auto fs = fs2;
-        auto params = params2;
-        fs.setMoleFraction(0, 0, 1.0);
-        fs.setMoleFraction(0, 1, 0.0);
-        fs.setMoleFraction(0, 2, 0.0);
-        params.updatePhase(fs, 0);
-#else
-#warning also a HACK
-        auto fs = fs2;
-        double sumx = 0.0;
-        for (int i = 0; i < FluidState::numComponents; ++i)
-            sumx += Opm::scalarValue(fs2.moleFraction(phaseIdx, i));
-        if (sumx < 0.95)  {
-            double alpha = 0.95/sumx;
-            std::cerr << "normalize: " << sumx
-                      << " alpha: " << alpha << "\n";
-            for (int i = 0; i < FluidState::numComponents; ++i)
-                fs.setMoleFraction(phaseIdx, i, alpha*fs2.moleFraction(phaseIdx, i));
-        }
-
-        /*
-#warning more of a HACK
-        fs.setMoleFraction(phaseIdx, 0, 0.0); // octane
-        fs.setMoleFraction(phaseIdx, 1, 0.0); // co2
-        fs.setMoleFraction(phaseIdx, 2, 0.95); // water
-        */
-
-        auto params = params2;
-        params.updatePhase(fs, phaseIdx);
-#endif
-     
         // note that we normalize the component mole fractions, so
         // that their sum is 100%. This increases numerical stability
         // considerably if the fluid state is not physical.
         LhsEval Vm = params.molarVolume(phaseIdx);
 
         // Calculate b_i / b
-        LhsEval bi_b = params.bPure(phaseIdx, compIdx) / params.b(phaseIdx);
+#warning HACK: pure instead of mixture
+        LhsEval bi_b = params.bPure(phaseIdx, compIdx) / params.bPure(phaseIdx, compIdx);
 
         // Calculate the compressibility factor
         LhsEval RT = R*fs.temperature(phaseIdx);
@@ -141,14 +109,16 @@ public:
         LhsEval Z = p*Vm/RT; // compressibility factor
 
         // Calculate A^* and B^* (see: Reid, p. 42)
-        LhsEval Astar = params.a(phaseIdx)*p/(RT*RT);
-        LhsEval Bstar = params.b(phaseIdx)*p/(RT);
+#warning HACK: pure instead of mixture
+        LhsEval Astar = params.aPure(phaseIdx, compIdx);
+        LhsEval Bstar = params.bPure(phaseIdx, compIdx)*p/(RT);
 
         // calculate delta_i (see: Reid, p. 145)
         LhsEval sumMoleFractions = 0.0;
         for (unsigned compJIdx = 0; compJIdx < numComponents; ++compJIdx)
             sumMoleFractions += fs.moleFraction(phaseIdx, compJIdx);
-        LhsEval deltai = 2*Opm::sqrt(params.aPure(phaseIdx, compIdx))/params.a(phaseIdx);
+#warning HACK: pure instead of mixture
+        LhsEval deltai = 2*Opm::sqrt(params.aPure(phaseIdx, compIdx))/params.aPure(phaseIdx, compIdx);
         LhsEval tmp = 0;
         for (unsigned compJIdx = 0; compJIdx < numComponents; ++compJIdx) {
             tmp +=
@@ -164,15 +134,9 @@ public:
             (2*Z + Bstar*(u - std::sqrt(u*u - 4*w)));
         LhsEval expo =  Astar/(Bstar*std::sqrt(u*u - 4*w))*(bi_b - deltai);
 
-#if 1
         LhsEval fugCoeff =
             Opm::exp(bi_b*(Z - 1))/Opm::max(1e-9, Z - Bstar) *
             Opm::pow(base, expo);
-#else
-#warning HACK
-        LhsEval fugCoeff =
-            Opm::exp(bi_b*(Z - 1))/Opm::max(1e-9, Z - Bstar);
-#endif
 
         ////////
         // limit the fugacity coefficient to a reasonable range:
@@ -188,11 +152,9 @@ public:
         //fugCoeff = Opm::max(1e-10, fugCoeff);
         ///////////
 
-        auto fugCoeffMix = fugCoeff;
-        
-#if 1 // -> use fugacity coefficient of mixture
-        return fugCoeffMix;
-#else // -> use pure fugacity coefficient
+        int comp2Idx = compIdx;
+        compIdx = 0;
+
         PengRobinsonParams<LhsEval> paramsPure;
         paramsPure.setTemperature(Opm::getValue(fs.temperature(phaseIdx)));
         paramsPure.setPressure(Opm::getValue(fs.pressure(phaseIdx)));
@@ -202,20 +164,36 @@ public:
         paramsPure.setMolarVolume(Opm::getValue(Vm2));
         auto fugCoeffPure = Opm::PengRobinson<LhsEval>::template computeFugacityCoeffient<LhsEval>(paramsPure);
 
-        for (unsigned compIdx = 0; compIdx < numComponents; ++compIdx) {
-            PengRobinsonParams<LhsEval> paramsPure;
-            paramsPure.setTemperature(Opm::getValue(fs.temperature(phaseIdx)));
-            paramsPure.setPressure(Opm::getValue(fs.pressure(phaseIdx)));
-            paramsPure.setA(Opm::getValue(params.aPure(phaseIdx, compIdx)));
-            paramsPure.setB(Opm::getValue(params.bPure(phaseIdx, compIdx)));
-            auto Vm2 = Opm::PengRobinson<LhsEval>::computeMolarVolume(fs, paramsPure, phaseIdx, false);
+        if (comp2Idx == 1)
+            return 2*fugCoeffPure;
+        return fugCoeffPure;
+
+
+#if 0
+        FluidState fs2(fs);
+        auto params2(params);
+        compIdx = 1;
+        for (int i = 0; i < 1000; ++i) {
+            Scalar p = 100e3 + (Scalar(i)/1000*1.9e6);
+
+            fs2.setPressure(phaseIdx, p);
+            params2.updatePhase(fs2, phaseIdx);
+
+            PengRobinsonParams<double> paramsPure;
+            paramsPure.setTemperature(Opm::getValue(fs2.temperature(phaseIdx)));
+            paramsPure.setPressure(Opm::getValue(fs2.pressure(phaseIdx)));
+            paramsPure.setA(Opm::getValue(params2.aPure(phaseIdx, compIdx)));
+            paramsPure.setB(Opm::getValue(params2.bPure(phaseIdx, compIdx)));
+            auto Vm2 = Opm::PengRobinson<double>::computeMolarVolume(fs2, paramsPure, phaseIdx, false);
             paramsPure.setMolarVolume(Opm::getValue(Vm2));
-            auto fugCoeffPure = Opm::PengRobinson<LhsEval>::template computeFugacityCoeffient<LhsEval>(paramsPure);
-            
+            auto fugCoeffPure = Opm::PengRobinson<double>::computeFugacityCoeffient<double>(paramsPure);
+
+            std::cerr << p << " " << fugCoeffPure*p << std::endl;
         }
 
-        std::cout << fugCoeffMix << " vs: " << fugCoeffPure << "\n";
-        return fugCoeffPure;
+        std::abort();
+#warning HACK
+        return 0;//fugCoeffPure;
 #endif
     }
 
