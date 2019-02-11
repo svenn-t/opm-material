@@ -246,8 +246,27 @@ protected:
 
         FluidState fluidState(fluidStateIn);
 
-            defect[i] = targetFug[i] - f;
-            absError = std::max(absError, std::abs(Opm::scalarValue(defect[i])));
+        // normalize composition of input fluid state
+#if 1
+        Evaluation sumx = 0.0;
+        for (int compIdx = 0; compIdx < numComponents; ++compIdx)
+            sumx += fluidState.moleFraction(phaseIdx, compIdx);
+        sumx = Opm::max(sumx, 1e-7);
+
+        if (sumx < 0.9) {
+            sumx = 0.9/sumx;
+
+            for (int compIdx = 0; compIdx < numComponents; ++compIdx) {
+                Evaluation  xi = fluidState.moleFraction(phaseIdx, compIdx)/sumx;
+                fluidState.setMoleFraction(phaseIdx, compIdx, xi);
+            }
+
+            Evaluation sumx2 = 0.0;
+            for (int compIdx = 0; compIdx < numComponents; ++compIdx)
+                sumx2 += fluidState.moleFraction(phaseIdx, compIdx);
+
+            std::cout << "sumx2: " << sumx2 << "\n";
+
         }
 #endif
 
@@ -317,24 +336,6 @@ protected:
                           unsigned phaseIdx,
                           const Dune::FieldVector<Evaluation, numComponents>& targetFug)
     {
-        // store original composition and calculate relative error
-        Dune::FieldVector<Evaluation, numComponents> origComp;
-        Scalar relError = 0;
-        Evaluation sumDelta = 0.0;
-        Evaluation sumx = 0.0;
-        for (unsigned i = 0; i < numComponents; ++i) {
-            origComp[i] = fluidState.moleFraction(phaseIdx, i);
-            relError = std::max(relError, std::abs(Opm::scalarValue(x[i])));
-
-            sumx += Opm::abs(fluidState.moleFraction(phaseIdx, i));
-            sumDelta += Opm::abs(x[i]);
-        }
-
-        // chop update to at most 20% change in composition
-        const Scalar maxDelta = 0.2;
-        if (sumDelta > maxDelta)
-            x /= (sumDelta/maxDelta);
-
         // change composition
         Scalar relError = 0.0;
         for (unsigned i = 0; i < numComponents; ++i) {
