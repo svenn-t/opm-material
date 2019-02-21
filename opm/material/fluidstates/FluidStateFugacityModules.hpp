@@ -29,6 +29,7 @@
 #define OPM_FLUID_STATE_FUGACITY_MODULES_HPP
 
 #include <opm/material/common/Valgrind.hpp>
+#include <opm/material/common/Exceptions.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -63,6 +64,8 @@ public:
     Scalar fugacity(unsigned phaseIdx, unsigned compIdx) const
     {
 #warning hack
+        if (phaseIdx == 1)
+            std::cout << compIdx << std::endl;
 
         return asImp_().pressure(phaseIdx)*fugacityCoefficient_[phaseIdx][compIdx]*asImp_().moleFraction(phaseIdx, compIdx);
     }
